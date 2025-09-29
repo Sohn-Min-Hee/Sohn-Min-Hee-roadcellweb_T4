@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>로드셀 영상 제어</title>
+<style>
+  body { margin:0; background:black; display:flex; justify-content:center; align-items:center; height:100vh; }
+  video { width:100%; height:100%; object-fit:contain; display:none; }
+  #connectBtn { position:absolute; top:20px; left:20px; z-index:10; padding:15px 20px; font-size:16px; border-radius:10px; }
+</style>
+</head>
+<body>
+
+<video id="videoA" autoplay loop muted playsinline>
+  <source src="videoA.mp4" type="video/mp4">
+</video>
+
+<video id="videoB" muted playsinline>
+  <source src="videoB.mp4" type="video/mp4">
+</video>
+
+<button id="connectBtn">센서 연결 / 재연결</button>
+
+<script>
+let videoA = document.getElementById("videoA");
+let videoB = document.getElementById("videoB");
+let connectBtn = document.getElementById("connectBtn");
+let lastState = "idle";  // idle = 0 근처, pulled = 당긴 상태
+
+// 초기 상태: 영상 A 표시
+videoA.style.display = "block";
+
+let bleDevice = null;
+let bleCharacteristic = null;
+
+// BLE 연결 함수 (재연결 포함)
+async function connectBLE(){
+  try{
+    // 이전 연결이 있으면 끊기
+    if(bleDevice && bleDevice.gatt.connected){
+      bleDevice.gatt.disconnect();
+      console.log("이전 연결 해제됨");
+    }
+
+    // 기기 검색 및 연결
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters:[{name:"ESP32-Loadcell"}],
+      optionalServices:["6e400001-b5a3-f393-e0a9-e50e24dcca9e"]
+    });
+
+    let server = await bleDevice.gatt.connect();
+    let service = await server.getPrimaryService("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
+    bleCharacteristic = await service.getCharacteristic("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
+
+    await bleCharacteristic.startNotifications();
+    bleCharacteristic.addEventListener("characteristicvaluechanged", handleValueChanged);
+
+    alert("BLE 연결 성공!");
+  }catch(err){
+    console.error("BLE 연결 실패:", err);
+    alert("BLE 연결 실패:"+err);
+  }
+}
+
+// 센서 값 이벤트 처리
+function handleValueChanged(event){
+  let value = new TextDecoder().decode(event.target.value).trim();
+
+  if(value === "1" && lastState === "idle"){
+    playVideoB();
+    lastState = "pulled";
+  }
+
+  if(value === "0" && lastState === "pulled"){
+    lastState = "idle";
+  }
+}
+
+// 영상 B 재생 후 자동 A로 복귀
+function playVideoB(){
+  videoA.style.display = "none";
+  videoB.style.display = "block";
+  videoB.currentTime = 0;
+
+  videoB.play().catch(err=>{
+    console.warn("videoB play 실패:", err);
+  });
+
+  videoB.onended = () => {
+    videoB.style.display = "none";
+    videoA.style.display = "block";
+    videoA.play().catch(err=>{
+      console.warn("videoA play 실패:", err);
+    });
+  };
+}
+
+// 버튼 터치/클릭
+connectBtn.addEventListener("click", connectBLE);
+connectBtn.addEventListener("touchstart", connectBLE);
+
+</script>
+</body>
+</html>
